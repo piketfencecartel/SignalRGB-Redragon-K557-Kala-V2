@@ -9,7 +9,9 @@ export function Validate(endpoint) { return endpoint.interface === 1; }
 export function ControllableParameters(){
 	return [
 		{property:"LightingMode", group:"lighting", label:"Modo de Iluminação", type:"combobox", values:["Canvas", "Forçado"], default:"Canvas"},
-		{property:"forcedColor", group:"lighting", label:"Cor Forçada", type:"color", default:"#009bde"}
+		{property:"forcedColor", group:"lighting", label:"Cor Forçada", type:"color", default:"#009bde"},
+		// Adicionado o controle deslizante (Slider) para o usuário com a legenda instrutiva
+		{property:"fpsLimit", group:"lighting", label:"Limite de FPS (Recomendado 28. Abaixe se a luz piscar ao digitar rápido)", type:"number", min:"15", max:"60", step:"1", default:"28"}
 	];
 }
 
@@ -35,7 +37,7 @@ const Keymap = {
 
 export function Initialize() {
 	device.set_endpoint(1, 0x0092, 0xff1c, 0x0004);
-	EVISION.Initialize(); // Constrói a lista e o buffer
+	EVISION.Initialize();
 	EVISION.setSoftwareMode();
 }
 
@@ -43,23 +45,20 @@ export function Render() {
 	EVISION.sendColors();
 }
 
-export function Shutdown() {
-	// Opcional: Retornar ao modo hardware ao fechar (nem sempre necessário, mas boa prática)
-	// device.write([0x04, ...comando_reset...], 64);
-}
+export function Shutdown() {}
 
 class EVISION_Device_Protocol {
 	constructor() {
-		this.RGBData = new Array(392).fill(0); // Buffer persistente
-		this.RenderList = []; // Cache de iteração
-		this.packetBuffer = new Array(64).fill(0); // Buffer de envio
+		this.RGBData = new Array(392).fill(0);
+		this.RenderList = [];
+		this.packetBuffer = new Array(64).fill(0); 
+		this.lastRenderTime = 0;
 	}
 
 	Initialize() {
 		const LedNames = [];
 		const LedPositions = [];
 		
-		// Pré-calcula a lista de renderização para não fazer parsing no loop
 		for (let id in Keymap) {
 			const entry = Keymap[id];
 			const keyId = parseInt(id);
@@ -69,9 +68,8 @@ class EVISION_Device_Protocol {
 			LedNames.push(entry[0]);
 			LedPositions.push([x, y]);
 
-			// Armazena apenas o necessário para o loop Render
 			this.RenderList.push({
-				idx: keyId * 3, // Índice direto no array de cor
+				idx: keyId * 3,
 				x: x,
 				y: y
 			});
@@ -83,7 +81,6 @@ class EVISION_Device_Protocol {
 	}
 
 	setSoftwareMode() {
-		// Handshake inicial
 		try {
 			device.write([0x04, 0x8c, 0x00, 0x0b, 0x30, 0x50, 0x01], 64);
 			device.pause(30);
@@ -93,30 +90,29 @@ class EVISION_Device_Protocol {
 	}
 
 	sendColors() {
+		// --- THROTTLING DINÂMICO ---
+		// Converte a escolha do usuário na interface (FPS) em milissegundos
+		const targetDelay = 1000 / (typeof fpsLimit !== 'undefined' ? fpsLimit : 28);
+		
+		const agora = Date.now();
+		if (agora - this.lastRenderTime < targetDelay) {
+			return; // Respeita a cadência escolhida na barrinha
+		}
+		this.lastRenderTime = agora;
+		// ---------------------------
+
 		const isForced = LightingMode === "Forçado";
 		let forcedRgb = [0, 0, 0];
 		
-		// Converte cor apenas uma vez por frame se estiver no modo forçado
 		if (isForced) {
 			forcedRgb = hexToRgb(forcedColor);
 		}
 
-		// Zera o buffer reutilizável (mais rápido que alocar um novo)
-		this.RGBData.fill(0);
-
-		// Loop Otimizado: sem parseInt, sem lookups de string
 		for (let i = 0; i < this.RenderList.length; i++) {
 			const item = this.RenderList[i];
-			let color;
+			let color = isForced ? forcedRgb : device.color(item.x, item.y);
 
-			if (isForced) {
-				color = forcedRgb;
-			} else {
-				color = device.color(item.x, item.y);
-			}
-
-			// Acesso direto à memória do buffer
-			this.RGBData[item.idx] = color[0];
+			this.RGBData[item.idx]     = color[0];
 			this.RGBData[item.idx + 1] = color[1];
 			this.RGBData[item.idx + 2] = color[2];
 		}
@@ -125,37 +121,34 @@ class EVISION_Device_Protocol {
 	}
 
 	writeRGBPackages() {
-		// Envia os 7 pacotes necessários
 		for (let i = 0; i < 7; i++) {
 			const start = i * 56;
+			let sum = 0;
 			
-			// Header Packet Construction
-			// [ReportID, CheckLow, CheckHigh, Command, Length, OffsetLow, OffsetHigh, Padding]
-			// Otimização: Slice ainda é necessário para o Checksum, mas é rápido o suficiente em QJS
-			const dataChunk = this.RGBData.slice(start, start + 56);
-			
-			// Preenche com zeros se for o último pacote incompleto
-			while(dataChunk.length < 56) dataChunk.push(0);
+			for (let j = 0; j < 56; j++) {
+				let val = this.RGBData[start + j] || 0;
+				this.packetBuffer[8 + j] = val;
+				sum += val;
+			}
 
-			const checksum = this.calcCheck(dataChunk, i);
+			const val = sum + start + 74;
 			
-			// Construção do pacote final (Header + Data)
-			const header = [0x04, checksum.low, checksum.high, 0x12, 56, (start & 0xFF), (start >>> 8) & 0xFF, 0x00];
+			this.packetBuffer[0] = 0x04;
+			this.packetBuffer[1] = val & 0xFF;             
+			this.packetBuffer[2] = (val >>> 8) & 0xFF;     
+			this.packetBuffer[3] = 0x12;                   
+			this.packetBuffer[4] = 56;                     
+			this.packetBuffer[5] = start & 0xFF;           
+			this.packetBuffer[6] = (start >>> 8) & 0xFF;   
+			this.packetBuffer[7] = 0x00;                   
 			
 			try {
-				device.write(header.concat(dataChunk), 64);
-			} catch (e) {
-				// Falha silenciosa para não crashar o render loop se houver instabilidade USB momentânea
-			}
+				device.write(this.packetBuffer, 64);
+				device.pause(2); 
+			} catch (e) {}
 		}
-	}
-
-	calcCheck(p, i) {
-		// Reduce é um pouco pesado, mas seguro. 
-		// Para ultra-otimização poderia ser um loop for, mas o ganho seria marginal aqui.
-		const sum = p.reduce((a, b) => a + b, 0);
-		const val = sum + (i * 56) + 74;
-		return { high: (val >>> 8) & 0xFF, low: val & 0xFF };
+        
+        device.pause(4); 
 	}
 }
 
