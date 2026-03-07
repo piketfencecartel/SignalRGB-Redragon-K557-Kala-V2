@@ -2,20 +2,18 @@ export function Name() { return "Redragon K557 Kala V2"; }
 export function VendorId() { return 0x320F; }
 export function ProductId() { return [0x5000, 0x5055]; }
 export function Publisher() { return "WhirlwindFx"; }
-export function Size() { return [22, 6]; } 
-export function DeviceType(){return "keyboard";}
+export function Size() { return [22, 6]; }
+export function DeviceType(){ return "keyboard"; }
 export function Validate(endpoint) { return endpoint.interface === 1; }
 
 export function ControllableParameters(){
 	return [
 		{property:"LightingMode", group:"lighting", label:"Modo de Iluminação", type:"combobox", values:["Canvas", "Forçado"], default:"Canvas"},
 		{property:"forcedColor", group:"lighting", label:"Cor Forçada", type:"color", default:"#009bde"},
-		// Adicionado o controle deslizante (Slider) para o usuário com a legenda instrutiva
 		{property:"fpsLimit", group:"lighting", label:"Limite de FPS (Recomendado 28. Abaixe se a luz piscar ao digitar rápido)", type:"number", min:"15", max:"60", step:"1", default:"28"}
 	];
 }
 
-// Mapa estático (Constante)
 const Keymap = {
 	0: ["Esc", [0, 0]], 1: ["'", [0, 1]], 2: ["Tab", [0, 2]], 3: ["Caps Lock", [0, 3]], 4: ["Left Shift", [0, 4]], 5: ["Left Ctrl", [0, 5]], 6: ["Num Lock", [18, 1]],
 	8: ["F1", [1, 0]], 9: ["1", [1, 1]], 10: ["Q", [1, 2]], 11: ["A", [1, 3]], 12: ["\\", [1, 4]], 13: ["Windows", [1, 5]], 14: ["Numpad /", [19, 1]],
@@ -50,31 +48,51 @@ export function Shutdown() {}
 class EVISION_Device_Protocol {
 	constructor() {
 		this.RGBData = new Array(392).fill(0);
-		this.RenderList = [];
-		this.packetBuffer = new Array(64).fill(0); 
+		this.packetBuffer = new Array(64).fill(0);
 		this.lastRenderTime = 0;
+
+		// Arrays planos: eliminam property lookups em {idx, x, y} por frame
+		this.ledCount = 0;
+		this.RenderIdx = null; // índice no RGBData (pré-multiplicado por 3)
+		this.RenderX   = null;
+		this.RenderY   = null;
+
+		// Cache do forcedColor para evitar regex por frame
+		this._lastForcedColor = "";
+		this._cachedForcedRgb = [0, 0, 0];
+
+		// Bytes constantes do cabeçalho — escritos aqui uma vez só
+		// packetBuffer[3], [4], [7] nunca mudam entre pacotes
+		this.packetBuffer[3] = 0x12;
+		this.packetBuffer[4] = 56;
+		this.packetBuffer[7] = 0x00;
 	}
 
 	Initialize() {
-		const LedNames = [];
+		const LedNames     = [];
 		const LedPositions = [];
-		
-		for (let id in Keymap) {
-			const entry = Keymap[id];
-			const keyId = parseInt(id);
-			const x = entry[1][0];
-			const y = entry[1][1];
+		const ids          = Object.keys(Keymap);
+		const count        = ids.length;
+
+		this.RenderIdx = new Array(count);
+		this.RenderX   = new Array(count);
+		this.RenderY   = new Array(count);
+		this.ledCount  = count;
+
+		for (var i = 0; i < count; i++) {
+			var id    = parseInt(ids[i]);
+			var entry = Keymap[id];
+			var x     = entry[1][0];
+			var y     = entry[1][1];
 
 			LedNames.push(entry[0]);
 			LedPositions.push([x, y]);
 
-			this.RenderList.push({
-				idx: keyId * 3,
-				x: x,
-				y: y
-			});
+			this.RenderIdx[i] = id * 3; // pré-multiplica: elimina id*3 por frame
+			this.RenderX[i]   = x;
+			this.RenderY[i]   = y;
 		}
-		
+
 		device.setName("Redragon K557 Kala V2");
 		device.setSize([22, 6]);
 		device.setControllableLeds(LedNames, LedPositions);
@@ -90,71 +108,87 @@ class EVISION_Device_Protocol {
 	}
 
 	sendColors() {
-		// --- THROTTLING DINÂMICO ---
-		// Converte a escolha do usuário na interface (FPS) em milissegundos
-		const targetDelay = 1000 / (typeof fpsLimit !== 'undefined' ? fpsLimit : 28);
-		
-		const agora = Date.now();
+		// Throttling: fpsLimit sempre definido após Initialize; || 28 como fallback seguro
+		var targetDelay = 1000 / (fpsLimit || 28);
+		var agora = Date.now();
 		if (agora - this.lastRenderTime < targetDelay) {
-			return; // Respeita a cadência escolhida na barrinha
+			return;
 		}
 		this.lastRenderTime = agora;
-		// ---------------------------
 
-		const isForced = LightingMode === "Forçado";
-		let forcedRgb = [0, 0, 0];
-		
-		if (isForced) {
-			forcedRgb = hexToRgb(forcedColor);
-		}
+		var RGBData  = this.RGBData;   // referência local evita this-lookup por LED
+		var RenderIdx = this.RenderIdx;
+		var RenderX   = this.RenderX;
+		var RenderY   = this.RenderY;
+		var len       = this.ledCount; // evita .length no objeto por iteração
+		var i, idx, color;
 
-		for (let i = 0; i < this.RenderList.length; i++) {
-			const item = this.RenderList[i];
-			let color = isForced ? forcedRgb : device.color(item.x, item.y);
+		if (LightingMode === "Forçado") {
+			// Cache: só recalcula o hex→rgb quando a cor mudar na UI
+			if (forcedColor !== this._lastForcedColor) {
+				this._cachedForcedRgb   = hexToRgb(forcedColor);
+				this._lastForcedColor   = forcedColor;
+			}
+			var fr = this._cachedForcedRgb[0];
+			var fg = this._cachedForcedRgb[1];
+			var fb = this._cachedForcedRgb[2];
 
-			this.RGBData[item.idx]     = color[0];
-			this.RGBData[item.idx + 1] = color[1];
-			this.RGBData[item.idx + 2] = color[2];
+			// Branch fora do loop: sem ternário por LED
+			for (i = 0; i < len; i++) {
+				idx = RenderIdx[i];
+				RGBData[idx]     = fr;
+				RGBData[idx + 1] = fg;
+				RGBData[idx + 2] = fb;
+			}
+		} else {
+			for (i = 0; i < len; i++) {
+				idx   = RenderIdx[i];
+				color = device.color(RenderX[i], RenderY[i]);
+				RGBData[idx]     = color[0];
+				RGBData[idx + 1] = color[1];
+				RGBData[idx + 2] = color[2];
+			}
 		}
 
 		this.writeRGBPackages();
 	}
 
 	writeRGBPackages() {
-		for (let i = 0; i < 7; i++) {
-			const start = i * 56;
-			let sum = 0;
-			
-			for (let j = 0; j < 56; j++) {
-				let val = this.RGBData[start + j] || 0;
-				this.packetBuffer[8 + j] = val;
+		var packetBuffer = this.packetBuffer; // referência local
+		var RGBData      = this.RGBData;
+		var i, j, start, sum, val;
+
+		for (i = 0; i < 7; i++) {
+			start = i * 56;
+			sum   = 0;
+
+			// Sem try/catch no hot path e sem || 0 (array já é numérico)
+			for (j = 0; j < 56; j++) {
+				val = RGBData[start + j];
+				packetBuffer[8 + j] = val;
 				sum += val;
 			}
 
-			const val = sum + start + 74;
-			
-			this.packetBuffer[0] = 0x04;
-			this.packetBuffer[1] = val & 0xFF;             
-			this.packetBuffer[2] = (val >>> 8) & 0xFF;     
-			this.packetBuffer[3] = 0x12;                   
-			this.packetBuffer[4] = 56;                     
-			this.packetBuffer[5] = start & 0xFF;           
-			this.packetBuffer[6] = (start >>> 8) & 0xFF;   
-			this.packetBuffer[7] = 0x00;                   
-			
-			try {
-				device.write(this.packetBuffer, 64);
-				device.pause(2); 
-			} catch (e) {}
+			val = sum + start + 74; // checksum: soma dos bytes + offset + constante do protocolo
+
+			// [3], [4], [7] já estão corretos desde o construtor
+			packetBuffer[0] = 0x04;
+			packetBuffer[1] = val & 0xFF;
+			packetBuffer[2] = (val >>> 8) & 0xFF;
+			packetBuffer[5] = start & 0xFF;
+			packetBuffer[6] = (start >>> 8) & 0xFF;
+
+			device.write(packetBuffer, 64);
+			device.pause(2);
 		}
-        
-        device.pause(4); 
+
+		device.pause(4);
 	}
 }
 
 const EVISION = new EVISION_Device_Protocol();
 
 function hexToRgb(hex) {
-	const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-	return result ? [parseInt(result[1], 16), parseInt(result[2], 16), parseInt(result[3], 16)] : [0,0,0];
+	var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+	return result ? [parseInt(result[1], 16), parseInt(result[2], 16), parseInt(result[3], 16)] : [0, 0, 0];
 }
