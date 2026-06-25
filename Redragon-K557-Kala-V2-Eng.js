@@ -8,9 +8,9 @@ export function Validate(endpoint) { return endpoint.interface === 1; }
 
 export function ControllableParameters(){
 	return [
-		{property:"LightingMode", group:"lighting", label:"Modo de Iluminação", type:"combobox", values:["Canvas", "Forçado"], default:"Canvas"},
-		{property:"forcedColor", group:"lighting", label:"Cor Forçada", type:"color", default:"#009bde"},
-		{property:"fpsLimit", group:"lighting", label:"Limite de FPS (Recomendado 28. Abaixe se a luz piscar ao digitar rápido)", type:"number", min:"15", max:"60", step:"1", default:"28"}
+		{property:"LightingMode", group:"lighting", label:"Lighting Mode", type:"combobox", values:["Canvas", "Forced"], default:"Canvas"},
+		{property:"forcedColor", group:"lighting", label:"Forced Color", type:"color", default:"#009bde"},
+		{property:"fpsLimit", group:"lighting", label:"FPS Limit (Recommended 28. Lower if the light blinks while typing fast)", type:"number", min:"15", max:"60", step:"1", default:"28"}
 	];
 }
 
@@ -29,8 +29,8 @@ const Keymap = {
 	88: ["F11", [11, 0]], 89: ["-", [11, 1]], 90: ["´", [11, 2]], 91: ["~", [11, 3]], 92: [";", [11, 4]], 93: ["Menu", [11, 5]], 94: ["Numpad 2", [19, 4]],
 	96: ["F12", [12, 0]], 97: ["=", [12, 1]], 98: ["[", [12, 2]], 99: ["]", [12, 3]], 100: ["/", [12, 4]], 101: ["Right Ctrl", [12, 5]], 102: ["Numpad 3", [20, 4]],
 	104: ["PrtSc", [15, 0]], 105: ["Backspace", [13, 1]], 107: ["Enter", [13, 3]], 108: ["Right Shift", [13, 4]], 109: ["Left Arrow", [15, 5]], 110: ["Numpad 0", [18, 5]],
-	111: ["Right Arrow", [15, 4]], 112: ["ScrLk", [16, 0]], 113: ["Insert", [15, 1]], 114: ["Delete", [15, 2]], 115: ["Page Up", [16, 1]], 116: ["Seta Cima", [16, 4]], 117: ["Seta Baixo", [16, 5]], 118: ["Numpad Del", [20, 5]],
-	120: ["Pause", [17, 0]], 121: ["Home", [16, 2]], 122: ["End", [16, 3]], 123: ["Page Down", [17, 1]], 124: ["Numpad 1", [18, 4]], 125: ["Seta Direita", [17, 5]], 126: ["Numpad Enter", [20, 5]]
+	111: ["Right Arrow", [15, 4]], 112: ["ScrLk", [16, 0]], 113: ["Insert", [15, 1]], 114: ["Delete", [15, 2]], 115: ["Page Up", [16, 1]], 116: ["Up Arrow", [16, 4]], 117: ["Down Arrow", [16, 5]], 118: ["Numpad Del", [20, 5]],
+	120: ["Pause", [17, 0]], 121: ["Home", [16, 2]], 122: ["End", [16, 3]], 123: ["Page Down", [17, 1]], 124: ["Numpad 1", [18, 4]], 125: ["Right Arrow", [17, 5]], 126: ["Numpad Enter", [20, 5]]
 };
 
 export function Initialize() {
