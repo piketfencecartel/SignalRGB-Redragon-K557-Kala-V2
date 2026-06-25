@@ -25,12 +25,12 @@ const Keymap = {
 	56: ["F7", [7, 0]], 57: ["7", [7, 1]], 58: ["U", [7, 2]], 59: ["J", [7, 3]], 60: ["N", [7, 4]], 62: ["Numpad 4", [18, 3]],
 	64: ["F8", [8, 0]], 65: ["8", [8, 1]], 66: ["I", [8, 2]], 67: ["K", [8, 3]], 68: ["M", [8, 4]], 70: ["Numpad 5", [19, 3]],
 	72: ["F9", [9, 0]], 73: ["9", [9, 1]], 74: ["O", [9, 2]], 75: ["L", [9, 3]], 76: [",", [9, 4]], 77: ["Right Alt", [9, 5]], 78: ["Numpad 6", [20, 3]],
-	80: ["F10", [10, 0]], 81: ["0", [10, 1]], 82: ["P", [10, 2]], 83: ["Ç", [10, 3]], 84: [".", [10, 4]], 85: ["Fn", [10, 5]], 86: ["Numpad +", [21, 3]],
+	80: ["F10", [10, 0]], 81: ["0", [10, 1]], 82: ["P", [10, 2]], 83: ["Ç", [10, 3]], 84: [".", [10, 4]], 85: ["Right Arrow", [10, 5]], 86: ["Numpad +", [21, 3]],
 	88: ["F11", [11, 0]], 89: ["-", [11, 1]], 90: ["´", [11, 2]], 91: ["~", [11, 3]], 92: [";", [11, 4]], 93: ["Menu", [11, 5]], 94: ["Numpad 2", [19, 4]],
 	96: ["F12", [12, 0]], 97: ["=", [12, 1]], 98: ["[", [12, 2]], 99: ["]", [12, 3]], 100: ["/", [12, 4]], 101: ["Right Ctrl", [12, 5]], 102: ["Numpad 3", [20, 4]],
 	104: ["PrtSc", [15, 0]], 105: ["Backspace", [13, 1]], 107: ["Enter", [13, 3]], 108: ["Right Shift", [13, 4]], 109: ["Left Arrow", [15, 5]], 110: ["Numpad 0", [18, 5]],
 	111: ["Right Arrow", [15, 4]], 112: ["ScrLk", [16, 0]], 113: ["Insert", [15, 1]], 114: ["Delete", [15, 2]], 115: ["Page Up", [16, 1]], 116: ["Up Arrow", [16, 4]], 117: ["Down Arrow", [16, 5]], 118: ["Numpad Del", [20, 5]],
-	120: ["Pause", [17, 0]], 121: ["Home", [16, 2]], 122: ["End", [16, 3]], 123: ["Page Down", [17, 1]], 124: ["Numpad 1", [18, 4]], 125: ["Right Arrow", [17, 5]], 126: ["Numpad Enter", [20, 3]]
+	120: ["Pause", [17, 0]], 121: ["Home", [16, 2]], 122: ["End", [16, 3]], 123: ["Page Down", [17, 1]], 124: ["Numpad 1", [18, 4]], 125: ["Numpad 3", [17, 5]], 126: ["Numpad Enter", [20, 3]]
 };
 
 export function Initialize() {
@@ -51,18 +51,18 @@ class EVISION_Device_Protocol {
 		this.packetBuffer = new Array(64).fill(0);
 		this.lastRenderTime = 0;
 
-		// Arrays planos: eliminam property lookups em {idx, x, y} por frame
+		// Flat arrays: eliminate property lookups on {idx, x, y} per frame
 		this.ledCount = 0;
-		this.RenderIdx = null; // índice no RGBData (pré-multiplicado por 3)
+		this.RenderIdx = null; // index in RGBData (pre-multiplied by 3)
 		this.RenderX   = null;
 		this.RenderY   = null;
 
-		// Cache do forcedColor para evitar regex por frame
+		// Cache of forcedColor to avoid regex per frame
 		this._lastForcedColor = "";
 		this._cachedForcedRgb = [0, 0, 0];
 
-		// Bytes constantes do cabeçalho — escritos aqui uma vez só
-		// packetBuffer[3], [4], [7] nunca mudam entre pacotes
+		// Constant header bytes — written here just once
+		// packetBuffer[3], [4], [7] never change between packets
 		this.packetBuffer[3] = 0x12;
 		this.packetBuffer[4] = 56;
 		this.packetBuffer[7] = 0x00;
@@ -88,7 +88,7 @@ class EVISION_Device_Protocol {
 			LedNames.push(entry[0]);
 			LedPositions.push([x, y]);
 
-			this.RenderIdx[i] = id * 3; // pré-multiplica: elimina id*3 por frame
+			this.RenderIdx[i] = id * 3; // pre-multiply: eliminates id*3 per frame
 			this.RenderX[i]   = x;
 			this.RenderY[i]   = y;
 		}
@@ -103,12 +103,12 @@ class EVISION_Device_Protocol {
 			device.write([0x04, 0x8c, 0x00, 0x0b, 0x30, 0x50, 0x01], 64);
 			device.pause(30);
 		} catch (e) {
-			device.log("Erro ao iniciar modo software: " + e);
+			device.log("Error starting software mode: " + e);
 		}
 	}
 
 	sendColors() {
-		// Throttling: fpsLimit sempre definido após Initialize; || 28 como fallback seguro
+		// Throttling: fpsLimit always set after Initialize; || 28 as a safe fallback
 		var targetDelay = 1000 / (fpsLimit || 28);
 		var agora = Date.now();
 		if (agora - this.lastRenderTime < targetDelay) {
@@ -116,15 +116,15 @@ class EVISION_Device_Protocol {
 		}
 		this.lastRenderTime = agora;
 
-		var RGBData  = this.RGBData;   // referência local evita this-lookup por LED
+		var RGBData  = this.RGBData;   // local reference avoids this-lookup by LED
 		var RenderIdx = this.RenderIdx;
 		var RenderX   = this.RenderX;
 		var RenderY   = this.RenderY;
-		var len       = this.ledCount; // evita .length no objeto por iteração
+		var len       = this.ledCount; // avoid .length on the object by iteration
 		var i, idx, color;
 
-		if (LightingMode === "Forçado") {
-			// Cache: só recalcula o hex→rgb quando a cor mudar na UI
+		if (LightingMode === "Forced") {
+			// Cache: only recalculates hex→rgb when the color changes in the UI
 			if (forcedColor !== this._lastForcedColor) {
 				this._cachedForcedRgb   = hexToRgb(forcedColor);
 				this._lastForcedColor   = forcedColor;
@@ -133,7 +133,7 @@ class EVISION_Device_Protocol {
 			var fg = this._cachedForcedRgb[1];
 			var fb = this._cachedForcedRgb[2];
 
-			// Branch fora do loop: sem ternário por LED
+			// Branch out of the loop: no ternary for LED
 			for (i = 0; i < len; i++) {
 				idx = RenderIdx[i];
 				RGBData[idx]     = fr;
@@ -154,7 +154,7 @@ class EVISION_Device_Protocol {
 	}
 
 	writeRGBPackages() {
-		var packetBuffer = this.packetBuffer; // referência local
+		var packetBuffer = this.packetBuffer; // reference local
 		var RGBData      = this.RGBData;
 		var i, j, start, sum, val;
 
